@@ -42,7 +42,7 @@ inventory-management-system/
 ## 🌐 Live Demo
 
 🚀 Try the application here:  
-[Inventory Management]()
+[Inventory Management](https://inventory-management-dashboard-using-app-pcwkyfahbxpsyvaxnrdp9.streamlit.app/)
 ---
 
 # ⚙️ Installation
