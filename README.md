@@ -39,7 +39,10 @@ inventory-management-system/
 ├── README.md
 
 ```
+## 🌐 Live Demo
 
+🚀 Try the application here:  
+[Inventory Management]()
 ---
 
 # ⚙️ Installation
