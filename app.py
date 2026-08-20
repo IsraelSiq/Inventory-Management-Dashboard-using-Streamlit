@@ -1,334 +1,163 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 from datetime import datetime
+from contextlib import contextmanager
 
-# ---------------- PAGE CONFIG ----------------
-st.set_page_config(
-    page_title="Inventory Management System",
-    page_icon="📦",
-    layout="wide"
-)
+DB_PATH = 'clinica_estoque.db'
 
-# ---------------- CUSTOM CSS ----------------
-st.markdown("""
-<style>
-.main {
-    background-color: #f5f7fa;
-}
+@contextmanager
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    try:
+        yield conn
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 
-.stButton>button {
-    width: 100%;
-    border-radius: 10px;
-    height: 3em;
-    background-color: #1f77b4;
-    color: white;
-    font-weight: bold;
-}
+def init_database():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('CREATE TABLE IF NOT EXISTS produtos (id INTEGER PRIMARY KEY AUTOINCREMENT, codigo TEXT UNIQUE NOT NULL, nome TEXT NOT NULL, categoria TEXT NOT NULL, unidade_medida TEXT NOT NULL DEFAULT "unidade", fornecedor TEXT, preco_unitario DECIMAL(10,2) NOT NULL DEFAULT 0, saldo_atual INTEGER NOT NULL DEFAULT 0, estoque_minimo INTEGER NOT NULL DEFAULT 10, controla_lote BOOLEAN NOT NULL DEFAULT FALSE, ativo BOOLEAN NOT NULL DEFAULT TRUE, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+        cursor.execute('CREATE TABLE IF NOT EXISTS movimentacoes (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, produto_id INTEGER NOT NULL, quantidade INTEGER NOT NULL, responsavel TEXT NOT NULL, destino TEXT NOT NULL, custo_unitario DECIMAL(10,2) NOT NULL DEFAULT 0, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+        cursor.execute('CREATE TABLE IF NOT EXISTS alertas (id INTEGER PRIMARY KEY AUTOINCREMENT, produto_id INTEGER NOT NULL, tipo TEXT NOT NULL, mensagem TEXT NOT NULL, lido BOOLEAN NOT NULL DEFAULT FALSE, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+        print("Banco de dados inicializado!")
 
-.stDataFrame {
-    border-radius: 10px;
-}
+def listar_produtos():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM produtos WHERE ativo = TRUE ORDER BY nome')
+        return cursor.fetchall()
 
-.metric-card {
-    padding: 20px;
-    border-radius: 12px;
-    background-color: white;
-    box-shadow: 0px 2px 8px rgba(0,0,0,0.1);
-}
-</style>
-""", unsafe_allow_html=True)
+def cadastrar_produto(codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, estoque_minimo, controla_lote):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO produtos (codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, estoque_minimo, controla_lote) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, estoque_minimo, controla_lote))
+        return cursor.lastrowid
 
-# ---------------- SESSION STATE ----------------
-if "inventory" not in st.session_state:
-    st.session_state.inventory = pd.DataFrame(
-        columns=[
-            "Product ID",
-            "Product Name",
-            "Category",
-            "Price",
-            "Quantity",
-            "Supplier",
-            "Last Updated"
-        ]
-    )
+def registrar_entrada(produto_id, quantidade, responsavel, destino, custo_unitario):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('UPDATE produtos SET saldo_atual = saldo_atual + ? WHERE id = ?', (quantidade, produto_id))
+        cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('ENTRADA', produto_id, quantidade, responsavel, destino, custo_unitario))
+        return cursor.lastrowid
 
-# ---------------- HEADER ----------------
-st.title("📦 Smart Inventory Management System")
-st.markdown("### Manage Products, Stock & Inventory Efficiently")
+def registrar_saida(produto_id, quantidade, responsavel, destino, custo_unitario):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT saldo_atual FROM produtos WHERE id = ?', (produto_id,))
+        produto = cursor.fetchone()
+        if not produto or produto['saldo_atual'] < quantidade:
+            raise ValueError("Saldo insuficiente")
+        cursor.execute('UPDATE produtos SET saldo_atual = saldo_atual - ? WHERE id = ?', (quantidade, produto_id))
+        cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('SAIDA', produto_id, quantidade, responsavel, destino, custo_unitario))
+        return cursor.lastrowid
 
-# ---------------- SIDEBAR ----------------
-menu = st.sidebar.radio(
-    "📌 Navigation",
-    [
-        "Dashboard",
-        "Add Product",
-        "Update Stock",
-        "Search Product",
-        "Remove Product",
-        "Inventory Report",
-        "Analytics"
-    ]
-)
+def verificar_alertas():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, nome, codigo, saldo_atual, estoque_minimo FROM produtos WHERE ativo = TRUE AND saldo_atual <= estoque_minimo')
+        produtos = cursor.fetchall()
+        for produto in produtos:
+            cursor.execute('SELECT id FROM alertas WHERE produto_id = ? AND tipo = "ESTOQUE_BAIXO" AND lido = FALSE', (produto['id'],))
+            if not cursor.fetchone():
+                mensagem = f"Estoque baixo: {produto['nome']} - Saldo: {produto['saldo_atual']}, Minimo: {produto['estoque_minimo']}"
+                cursor.execute('INSERT INTO alertas (produto_id, tipo, mensagem) VALUES (?, ?, ?)', (produto['id'], 'ESTOQUE_BAIXO', mensagem))
 
-# ---------------- DASHBOARD ----------------
+st.set_page_config(page_title="Controle de Estoque - Clinica", layout="wide")
+init_database()
+
+st.sidebar.title("Controle de Estoque")
+menu = st.sidebar.radio("Navegacao", ["Dashboard", "Produtos", "Entradas", "Saidas", "Alertas"])
+
 if menu == "Dashboard":
+    st.title("Dashboard")
+    produtos = listar_produtos()
+    total = len(produtos)
+    valor = sum(p['saldo_atual'] * p['preco_unitario'] for p in produtos)
+    baixo = sum(1 for p in produtos if p['saldo_atual'] <= p['estoque_minimo'])
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Produtos", total)
+    c2.metric("Valor em Estoque", f"R$ {valor:,.2f}")
+    c3.metric("Estoque Baixo", baixo)
 
-    st.subheader("📊 Inventory Dashboard")
+elif menu == "Produtos":
+    st.title("Produtos")
+    with st.form("cadastro"):
+        codigo = st.text_input("Codigo")
+        nome = st.text_input("Nome")
+        categoria = st.selectbox("Categoria", ["Medicamentos", "Descartaveis", "Equipamentos", "Exames", "Outros"])
+        unidade = st.selectbox("Unidade", ["unidade", "caixa", "pacote", "frasco"])
+        fornecedor = st.text_input("Fornecedor")
+        preco = st.number_input("Preco", min_value=0.0)
+        minimo = st.number_input("Estoque minimo", min_value=0, value=10)
+        lote = st.checkbox("Controla lote")
+        if st.form_submit_button("Salvar"):
+            try:
+                cadastrar_produto(codigo.upper(), nome, categoria, unidade, fornecedor, preco, minimo, lote)
+                st.success("Produto cadastrado!")
+            except Exception as e:
+                st.error(f"Erro: {e}")
+    produtos = listar_produtos()
+    if produtos:
+        df = pd.DataFrame(produtos)
+        st.dataframe(df, use_container_width=True)
 
-    total_products = len(st.session_state.inventory)
+elif menu == "Entradas":
+    st.title("Entradas")
+    produtos = listar_produtos()
+    if produtos:
+        opcoes = {f"{p['codigo']} - {p['nome']}": p['id'] for p in produtos}
+        with st.form("entrada"):
+            produto_sel = st.selectbox("Produto", list(opcoes.keys()))
+            qtd = st.number_input("Quantidade", min_value=1)
+            resp = st.text_input("Responsavel")
+            destino = st.selectbox("Destino", ["Almoxarifado", "Radiologia", "Oftalmologia", "Odontologia", "Nutricao", "Geral"])
+            custo = st.number_input("Custo unitario", min_value=0.0)
+            if st.form_submit_button("Registrar"):
+                try:
+                    registrar_entrada(opcoes[produto_sel], qtd, resp, destino, custo)
+                    st.success("Entrada registrada!")
+                except Exception as e:
+                    st.error(f"Erro: {e}")
 
-    total_stock = (
-        st.session_state.inventory["Quantity"].sum()
-        if not st.session_state.inventory.empty else 0
-    )
+elif menu == "Saidas":
+    st.title("Saidas")
+    produtos = listar_produtos()
+    if produtos:
+        opcoes = {f"{p['codigo']} - {p['nome']}": p['id'] for p in produtos}
+        with st.form("saida"):
+            produto_sel = st.selectbox("Produto", list(opcoes.keys()))
+            qtd = st.number_input("Quantidade", min_value=1)
+            resp = st.text_input("Responsavel")
+            destino = st.selectbox("Destino", ["Almoxarifado", "Radiologia", "Oftalmologia", "Odontologia", "Nutricao", "Geral"])
+            custo = st.number_input("Custo unitario", min_value=0.0)
+            if st.form_submit_button("Registrar"):
+                try:
+                    registrar_saida(opcoes[produto_sel], qtd, resp, destino, custo)
+                    st.success("Saida registrada!")
+                except Exception as e:
+                    st.error(f"Erro: {e}")
 
-    total_value = (
-        (
-            st.session_state.inventory["Price"]
-            * st.session_state.inventory["Quantity"]
-        ).sum()
-        if not st.session_state.inventory.empty else 0
-    )
-
-    low_stock = (
-        len(
-            st.session_state.inventory[
-                st.session_state.inventory["Quantity"] < 5
-            ]
-        )
-        if not st.session_state.inventory.empty else 0
-    )
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("📦 Products", total_products)
-    col2.metric("📊 Total Stock", total_stock)
-    col3.metric("💰 Inventory Value", f"₹ {total_value:,.2f}")
-    col4.metric("⚠ Low Stock", low_stock)
-
-    st.markdown("---")
-
-    if not st.session_state.inventory.empty:
-        st.subheader("📋 Recent Inventory")
-        st.dataframe(
-            st.session_state.inventory,
-            use_container_width=True
-        )
+elif menu == "Alertas":
+    st.title("Alertas")
+    verificar_alertas()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT a.*, p.nome as produto_nome FROM alertas a JOIN produtos p ON a.produto_id = p.id WHERE a.lido = FALSE ORDER BY a.criado_em DESC')
+        alertas = cursor.fetchall()
+    if alertas:
+        for alerta in alertas:
+            st.error(alerta['mensagem'])
+            if st.button(f"Marcar como lido - {alerta['id']}", key=alerta['id']):
+                with get_db_connection() as conn:
+                    conn.cursor().execute('UPDATE alertas SET lido = TRUE WHERE id = ?', (alerta['id'],))
+                st.rerun()
     else:
-        st.info("Inventory is currently empty.")
-
-# ---------------- ADD PRODUCT ----------------
-elif menu == "Add Product":
-
-    st.subheader("➕ Add New Product")
-
-    with st.form("add_product_form"):
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            product_id = st.text_input("Product ID")
-            product_name = st.text_input("Product Name")
-            category = st.selectbox(
-                "Category",
-                ["Electronics", "Food", "Clothing", "Furniture", "Other"]
-            )
-
-        with col2:
-            price = st.number_input(
-                "Price",
-                min_value=0.0,
-                format="%.2f"
-            )
-
-            quantity = st.number_input(
-                "Quantity",
-                min_value=0,
-                step=1
-            )
-
-            supplier = st.text_input("Supplier Name")
-
-        submit = st.form_submit_button("Add Product")
-
-        if submit:
-
-            if (
-                product_id.strip() == ""
-                or product_name.strip() == ""
-                or supplier.strip() == ""
-            ):
-                st.error("❌ All fields are required")
-
-            elif product_id in st.session_state.inventory["Product ID"].values:
-                st.error("❌ Product ID already exists")
-
-            elif price <= 0:
-                st.error("❌ Price must be greater than 0")
-
-            elif quantity <= 0:
-                st.error("❌ Quantity must be greater than 0")
-
-            else:
-
-                new_row = pd.DataFrame([{
-                    "Product ID": product_id,
-                    "Product Name": product_name,
-                    "Category": category,
-                    "Price": price,
-                    "Quantity": quantity,
-                    "Supplier": supplier,
-                    "Last Updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }])
-
-                st.session_state.inventory = pd.concat(
-                    [st.session_state.inventory, new_row],
-                    ignore_index=True
-                )
-
-                st.success("✅ Product added successfully")
-
-# ---------------- UPDATE STOCK ----------------
-elif menu == "Update Stock":
-
-    st.subheader("🔄 Update Product Stock")
-
-    if st.session_state.inventory.empty:
-        st.warning("⚠ No products available")
-    else:
-
-        product = st.selectbox(
-            "Select Product",
-            st.session_state.inventory["Product Name"]
-        )
-
-        new_qty = st.number_input(
-            "New Quantity",
-            min_value=0,
-            step=1
-        )
-
-        if st.button("Update Stock"):
-
-            index = st.session_state.inventory[
-                st.session_state.inventory["Product Name"] == product
-            ].index[0]
-
-            st.session_state.inventory.at[index, "Quantity"] = new_qty
-            st.session_state.inventory.at[
-                index,
-                "Last Updated"
-            ] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            st.success("✅ Stock updated successfully")
-
-# ---------------- SEARCH PRODUCT ----------------
-elif menu == "Search Product":
-
-    st.subheader("🔍 Search Product")
-
-    search = st.text_input("Enter Product Name")
-
-    if st.button("Search"):
-
-        result = st.session_state.inventory[
-            st.session_state.inventory["Product Name"]
-            .str.contains(search, case=False, na=False)
-        ]
-
-        if result.empty:
-            st.warning("⚠ No matching product found")
-        else:
-            st.dataframe(result, use_container_width=True)
-
-# ---------------- REMOVE PRODUCT ----------------
-elif menu == "Remove Product":
-
-    st.subheader("❌ Remove Product")
-
-    if st.session_state.inventory.empty:
-        st.warning("⚠ Inventory is empty")
-
-    else:
-
-        product = st.selectbox(
-            "Select Product to Remove",
-            st.session_state.inventory["Product Name"]
-        )
-
-        if st.button("Remove Product"):
-
-            st.session_state.inventory = (
-                st.session_state.inventory[
-                    st.session_state.inventory["Product Name"] != product
-                ]
-            )
-
-            st.success("✅ Product removed successfully")
-
-# ---------------- INVENTORY REPORT ----------------
-elif menu == "Inventory Report":
-
-    st.subheader("📑 Inventory Report")
-
-    if st.session_state.inventory.empty:
-        st.info("ℹ No inventory data available")
-
-    else:
-
-        inventory = st.session_state.inventory.copy()
-
-        inventory["Stock Value"] = (
-            inventory["Price"] * inventory["Quantity"]
-        )
-
-        st.dataframe(
-            inventory,
-            use_container_width=True
-        )
-
-        csv = inventory.to_csv(index=False).encode("utf-8")
-
-        st.download_button(
-            label="📥 Download Report",
-            data=csv,
-            file_name="inventory_report.csv",
-            mime="text/csv"
-        )
-
-# ---------------- ANALYTICS ----------------
-elif menu == "Analytics":
-
-    st.subheader("📈 Inventory Analytics")
-
-    if st.session_state.inventory.empty:
-        st.info("ℹ No data available for analytics")
-
-    else:
-
-        inventory = st.session_state.inventory.copy()
-
-        inventory["Stock Value"] = (
-            inventory["Price"] * inventory["Quantity"]
-        )
-
-        st.bar_chart(
-            inventory.set_index("Product Name")["Quantity"]
-        )
-
-        st.bar_chart(
-            inventory.set_index("Product Name")["Stock Value"]
-        )
-
-        low_stock_items = inventory[inventory["Quantity"] < 5]
-
-        st.subheader("⚠ Low Stock Products")
-
-        if low_stock_items.empty:
-            st.success("✅ No low stock items")
-        else:
-            st.dataframe(low_stock_items)
-
-# ---------------- FOOTER ----------------
-st.markdown("---")
-st.caption("© 2026 Smart Inventory Management System | Built with Streamlit")
+        st.success("Nenhum alerta pendente!")
