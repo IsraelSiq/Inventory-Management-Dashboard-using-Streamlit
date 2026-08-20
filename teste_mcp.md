@@ -1,0 +1,1 @@
+# Arquivo de Teste - Este arquivo foi criado para testar a integracao com GitHub MCP.
