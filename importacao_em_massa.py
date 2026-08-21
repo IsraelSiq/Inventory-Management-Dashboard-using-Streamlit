@@ -59,7 +59,7 @@ def atualizar_produto(cursor, produto_id, produto):
 def registrar_entrada(cursor, produto_id, quantidade, responsavel='IMPORTACAO', destino='ALMOXARIFADO', custo_unitario=0.0):
     cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('ENTRADA', produto_id, quantidade, responsavel, destino, custo_unitario))
 
-def importar_produtos_em_massa(df_produtos, db_path='cdt_estoque.db', responsavel='IMPORTACAO'):
+def importar_produtos_em_massa(df_produtos, db_path='clinica_estoque.db', responsavel='IMPORTACAO'):
     relatorio = {'total': len(df_produtos), 'inseridos': 0, 'atualizados': 0, 'erros': 0, 'detalhes': []}
     try:
         validar_df_importacao(df_produtos)

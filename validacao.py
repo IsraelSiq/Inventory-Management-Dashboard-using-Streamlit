@@ -172,7 +172,7 @@ def detectar_duplicidades(df):
     return duplicados
 
 
-def validar_codigos_existentes(df, db_path='cdt_estoque.db'):
+def validar_codigos_existentes(df, db_path='clinica_estoque.db'):
     """
     Valida se codigos ja existem no banco de dados.
     
@@ -207,7 +207,7 @@ def validar_codigos_existentes(df, db_path='cdt_estoque.db'):
     return codigos_existentes
 
 
-def validar_dados_completos(df, db_path='cdt_estoque.db'):
+def validar_dados_completos(df, db_path='clinica_estoque.db'):
     """
     Valida dados completos e retorna erros e avisos.
     
