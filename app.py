@@ -1,10 +1,12 @@
+import os
 import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
 from contextlib import contextmanager
 
-DB_PATH = 'clinica_estoque.db'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'clinica_estoque.db')
 
 @contextmanager
 def get_db_connection():
@@ -24,9 +26,46 @@ def get_db_connection():
 def init_database():
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('CREATE TABLE IF NOT EXISTS produtos (id INTEGER PRIMARY KEY AUTOINCREMENT, codigo TEXT UNIQUE NOT NULL, nome TEXT NOT NULL, categoria TEXT NOT NULL, unidade_medida TEXT NOT NULL DEFAULT "unidade", fornecedor TEXT, preco_unitario DECIMAL(10,2) NOT NULL DEFAULT 0, saldo_atual INTEGER NOT NULL DEFAULT 0, estoque_minimo INTEGER NOT NULL DEFAULT 10, controla_lote BOOLEAN NOT NULL DEFAULT FALSE, ativo BOOLEAN NOT NULL DEFAULT TRUE, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-        cursor.execute('CREATE TABLE IF NOT EXISTS movimentacoes (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, produto_id INTEGER NOT NULL, quantidade INTEGER NOT NULL, responsavel TEXT NOT NULL, destino TEXT NOT NULL, custo_unitario DECIMAL(10,2) NOT NULL DEFAULT 0, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-        cursor.execute('CREATE TABLE IF NOT EXISTS alertas (id INTEGER PRIMARY KEY AUTOINCREMENT, produto_id INTEGER NOT NULL, tipo TEXT NOT NULL, mensagem TEXT NOT NULL, lido BOOLEAN NOT NULL DEFAULT FALSE, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS produtos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                codigo TEXT UNIQUE NOT NULL,
+                nome TEXT NOT NULL,
+                categoria TEXT NOT NULL,
+                unidade_medida TEXT NOT NULL DEFAULT "unidade",
+                fornecedor TEXT,
+                preco_unitario DECIMAL(10,2) NOT NULL DEFAULT 0,
+                saldo_atual INTEGER NOT NULL DEFAULT 0,
+                estoque_minimo INTEGER NOT NULL DEFAULT 10,
+                controla_lote BOOLEAN NOT NULL DEFAULT FALSE,
+                ativo BOOLEAN NOT NULL DEFAULT TRUE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS movimentacoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tipo TEXT NOT NULL,
+                produto_id INTEGER NOT NULL,
+                quantidade INTEGER NOT NULL,
+                responsavel TEXT NOT NULL,
+                destino TEXT NOT NULL,
+                custo_unitario DECIMAL(10,2) NOT NULL DEFAULT 0,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (produto_id) REFERENCES produtos(id)
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS alertas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                produto_id INTEGER NOT NULL,
+                tipo TEXT NOT NULL,
+                mensagem TEXT NOT NULL,
+                lido BOOLEAN NOT NULL DEFAULT FALSE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (produto_id) REFERENCES produtos(id)
+            )
+        ''')
         print("Banco de dados inicializado!")
 
 def listar_produtos():
@@ -35,28 +74,70 @@ def listar_produtos():
         cursor.execute('SELECT * FROM produtos WHERE ativo = TRUE ORDER BY nome')
         return cursor.fetchall()
 
+def normalizar_codigo(codigo):
+    if codigo is None:
+        return ''
+    return str(codigo).strip().upper()
+
+
+def validar_produto(codigo, nome, preco_unitario, estoque_minimo):
+    codigo = normalizar_codigo(codigo)
+    nome = (nome or '').strip()
+
+    if not codigo:
+        raise ValueError('Codigo do produto e obrigatorio.')
+    if not nome:
+        raise ValueError('Nome do produto e obrigatorio.')
+    if preco_unitario < 0:
+        raise ValueError('Preco unitario nao pode ser negativo.')
+    if estoque_minimo < 0:
+        raise ValueError('Estoque minimo nao pode ser negativo.')
+
+    return codigo, nome
+
+
 def cadastrar_produto(codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, estoque_minimo, controla_lote):
+    codigo, nome = validar_produto(codigo, nome, preco_unitario, estoque_minimo)
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute('SELECT id FROM produtos WHERE codigo = ? AND ativo = TRUE', (codigo,))
+        if cursor.fetchone():
+            raise ValueError(f'Ja existe um produto com o codigo {codigo}.')
         cursor.execute('INSERT INTO produtos (codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, estoque_minimo, controla_lote) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, estoque_minimo, controla_lote))
         return cursor.lastrowid
 
+
 def registrar_entrada(produto_id, quantidade, responsavel, destino, custo_unitario):
+    if quantidade <= 0:
+        raise ValueError('Quantidade deve ser maior que zero.')
+    if not responsavel or not responsavel.strip():
+        raise ValueError('Responsavel e obrigatorio.')
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute('SELECT id, saldo_atual FROM produtos WHERE id = ? AND ativo = TRUE', (produto_id,))
+        produto = cursor.fetchone()
+        if not produto:
+            raise ValueError('Produto nao encontrado.')
         cursor.execute('UPDATE produtos SET saldo_atual = saldo_atual + ? WHERE id = ?', (quantidade, produto_id))
-        cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('ENTRADA', produto_id, quantidade, responsavel, destino, custo_unitario))
+        cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('ENTRADA', produto_id, quantidade, responsavel.strip(), destino, custo_unitario))
         return cursor.lastrowid
 
+
 def registrar_saida(produto_id, quantidade, responsavel, destino, custo_unitario):
+    if quantidade <= 0:
+        raise ValueError('Quantidade deve ser maior que zero.')
+    if not responsavel or not responsavel.strip():
+        raise ValueError('Responsavel e obrigatorio.')
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT saldo_atual FROM produtos WHERE id = ?', (produto_id,))
+        cursor.execute('SELECT saldo_atual FROM produtos WHERE id = ? AND ativo = TRUE', (produto_id,))
         produto = cursor.fetchone()
-        if not produto or produto['saldo_atual'] < quantidade:
-            raise ValueError("Saldo insuficiente")
+        if not produto:
+            raise ValueError('Produto nao encontrado.')
+        if produto['saldo_atual'] < quantidade:
+            raise ValueError('Saldo insuficiente para a saida solicitada.')
         cursor.execute('UPDATE produtos SET saldo_atual = saldo_atual - ? WHERE id = ?', (quantidade, produto_id))
-        cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('SAIDA', produto_id, quantidade, responsavel, destino, custo_unitario))
+        cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('SAIDA', produto_id, quantidade, responsavel.strip(), destino, custo_unitario))
         return cursor.lastrowid
 
 def verificar_alertas():

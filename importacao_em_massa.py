@@ -22,20 +22,39 @@ def get_db_connection(db_path):
         conn.close()
 
 def produto_existe(cursor, codigo):
+    codigo = str(codigo).strip().upper()
     cursor.execute('SELECT id FROM produtos WHERE codigo = ? AND ativo = TRUE', (codigo,))
     return cursor.fetchone() is not None
 
 def get_produto_id(cursor, codigo):
+    codigo = str(codigo).strip().upper()
     cursor.execute('SELECT id FROM produtos WHERE codigo = ? AND ativo = TRUE', (codigo,))
     resultado = cursor.fetchone()
     return resultado['id'] if resultado else None
 
+def validar_df_importacao(df_produtos):
+    if df_produtos is None or df_produtos.empty:
+        raise ValueError('Arquivo vazio ou sem dados para importar.')
+
+    colunas_obrigatorias = ['ITEM', 'MATERIAL', 'UNIDADE', 'ESTOQUE_ATUAL', 'ESTOQUE_MINIMO', 'CATEGORIA']
+    colunas_faltando = [col for col in colunas_obrigatorias if col not in df_produtos.columns]
+    if colunas_faltando:
+        raise ValueError(f'Colunas faltando: {", ".join(colunas_faltando)}')
+
+    linhas_validas = df_produtos[df_produtos['MATERIAL'].notna() & (df_produtos['MATERIAL'].astype(str).str.strip() != '')]
+    if len(linhas_validas) == 0:
+        raise ValueError('Nenhuma linha valida encontrada para importacao.')
+
+    return True
+
+
 def inserir_produto(cursor, produto):
-    cursor.execute('INSERT INTO produtos (codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, saldo_atual, estoque_minimo, controla_lote) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', (produto.get('ITEM', ''), produto.get('MATERIAL', ''), produto.get('CATEGORIA', 'Outros'), produto.get('UNIDADE', 'UND'), produto.get('FORNECEDOR', ''), float(produto.get('PRECO_UNITARIO', 0.0)), int(produto.get('ESTOQUE_ATUAL', 0)), int(produto.get('ESTOQUE_MINIMO', 10)), produto.get('CONTROLA_LOTE', False)))
+    codigo = str(produto.get('ITEM', '')).strip().upper()
+    cursor.execute('INSERT INTO produtos (codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, saldo_atual, estoque_minimo, controla_lote) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', (codigo, str(produto.get('MATERIAL', '')).strip(), str(produto.get('CATEGORIA', 'Outros')).strip() or 'Outros', str(produto.get('UNIDADE', 'UND')).strip().upper(), str(produto.get('FORNECEDOR', '')).strip(), float(produto.get('PRECO_UNITARIO', 0.0) or 0.0), int(produto.get('ESTOQUE_ATUAL', 0) or 0), int(produto.get('ESTOQUE_MINIMO', 10) or 10), bool(produto.get('CONTROLA_LOTE', False))))
     return cursor.lastrowid
 
 def atualizar_produto(cursor, produto_id, produto):
-    cursor.execute('UPDATE produtos SET nome = ?, categoria = ?, unidade_medida = ?, fornecedor = ?, preco_unitario = ?, saldo_atual = ?, estoque_minimo = ?, controla_lote = ? WHERE id = ?', (produto.get('MATERIAL', ''), produto.get('CATEGORIA', 'Outros'), produto.get('UNIDADE', 'UND'), produto.get('FORNECEDOR', ''), float(produto.get('PRECO_UNITARIO', 0.0)), int(produto.get('ESTOQUE_ATUAL', 0)), int(produto.get('ESTOQUE_MINIMO', 10)), produto.get('CONTROLA_LOTE', False), produto_id))
+    cursor.execute('UPDATE produtos SET nome = ?, categoria = ?, unidade_medida = ?, fornecedor = ?, preco_unitario = ?, saldo_atual = ?, estoque_minimo = ?, controla_lote = ? WHERE id = ?', (str(produto.get('MATERIAL', '')).strip(), str(produto.get('CATEGORIA', 'Outros')).strip() or 'Outros', str(produto.get('UNIDADE', 'UND')).strip().upper(), str(produto.get('FORNECEDOR', '')).strip(), float(produto.get('PRECO_UNITARIO', 0.0) or 0.0), int(produto.get('ESTOQUE_ATUAL', 0) or 0), int(produto.get('ESTOQUE_MINIMO', 10) or 10), bool(produto.get('CONTROLA_LOTE', False)), produto_id))
 
 def registrar_entrada(cursor, produto_id, quantidade, responsavel='IMPORTACAO', destino='ALMOXARIFADO', custo_unitario=0.0):
     cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('ENTRADA', produto_id, quantidade, responsavel, destino, custo_unitario))
@@ -43,27 +62,30 @@ def registrar_entrada(cursor, produto_id, quantidade, responsavel='IMPORTACAO', 
 def importar_produtos_em_massa(df_produtos, db_path='cdt_estoque.db', responsavel='IMPORTACAO'):
     relatorio = {'total': len(df_produtos), 'inseridos': 0, 'atualizados': 0, 'erros': 0, 'detalhes': []}
     try:
+        validar_df_importacao(df_produtos)
         with get_db_connection(db_path) as conn:
             cursor = conn.cursor()
             for index, row in df_produtos.iterrows():
                 produto = row.to_dict()
-                codigo = produto.get('ITEM', '')
+                codigo = str(produto.get('ITEM', '')).strip().upper()
                 try:
-                    if not codigo or codigo.strip() == '':
+                    if not codigo:
                         relatorio['erros'] += 1
                         relatorio['detalhes'].append({'linha': index + 1, 'erro': 'Codigo vazio', 'produto': produto.get('MATERIAL', 'N/A')})
                         continue
                     if produto_existe(cursor, codigo):
                         produto_id = get_produto_id(cursor, codigo)
                         atualizar_produto(cursor, produto_id, produto)
-                        estoque = int(produto.get('ESTOQUE_ATUAL', 0))
-                        if estoque > 0: registrar_entrada(cursor, produto_id, estoque, responsavel, 'ALMOXARIFADO', float(produto.get('PRECO_UNITARIO', 0.0)))
+                        estoque = int(produto.get('ESTOQUE_ATUAL', 0) or 0)
+                        if estoque > 0:
+                            registrar_entrada(cursor, produto_id, estoque, responsavel, 'ALMOXARIFADO', float(produto.get('PRECO_UNITARIO', 0.0) or 0.0))
                         relatorio['atualizados'] += 1
                         relatorio['detalhes'].append({'linha': index + 1, 'acao': 'ATUALIZADO', 'codigo': codigo, 'produto': produto.get('MATERIAL', 'N/A')})
                     else:
                         produto_id = inserir_produto(cursor, produto)
-                        estoque = int(produto.get('ESTOQUE_ATUAL', 0))
-                        if estoque > 0: registrar_entrada(cursor, produto_id, estoque, responsavel, 'ALMOXARIFADO', float(produto.get('PRECO_UNITARIO', 0.0)))
+                        estoque = int(produto.get('ESTOQUE_ATUAL', 0) or 0)
+                        if estoque > 0:
+                            registrar_entrada(cursor, produto_id, estoque, responsavel, 'ALMOXARIFADO', float(produto.get('PRECO_UNITARIO', 0.0) or 0.0))
                         relatorio['inseridos'] += 1
                         relatorio['detalhes'].append({'linha': index + 1, 'acao': 'INSERIDO', 'codigo': codigo, 'produto': produto.get('MATERIAL', 'N/A')})
                 except Exception as e:
