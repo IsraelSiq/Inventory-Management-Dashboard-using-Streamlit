@@ -1,65 +1,64 @@
-# 📦 Smart Inventory Management System
+# 📦 Inventory Management Dashboard
 
-A professional Inventory Management System built using Streamlit and Pandas.  
-This application helps businesses manage products, stock levels, inventory value, and analytics through an interactive dashboard.
-
----
-
-# 🚀 Features
-
-✅ Add New Products  
-✅ Update Product Stock  
-✅ Remove Products  
-✅ Search Products  
-✅ Inventory Dashboard  
-✅ Inventory Analytics  
-✅ CSV Report Download  
-✅ Low Stock Alerts  
-✅ Real-Time Inventory Value Calculation  
-✅ Interactive Data Tables & Charts  
+Aplicativo de controle de estoque em Python com Streamlit, focado em ambiente clínico/CDT. O projeto permite cadastrar produtos, controlar entradas e saídas, visualizar alertas de estoque baixo e importar planilhas em massa.
 
 ---
 
-# 🛠️ Tech Stack
+# 🚀 Funcionalidades
+
+✅ Cadastro de produtos
+✅ Controle de estoque por unidade e categoria
+✅ Registro de entradas e saídas
+✅ Alertas automáticos de estoque baixo
+✅ Dashboard com indicadores de estoque
+✅ Importação de planilhas CSV/XLSX
+✅ Revisão e validação de dados antes da importação
+✅ Persistência local em SQLite
+
+---
+
+# 🛠️ Stack
 
 - Python
 - Streamlit
 - Pandas
+- SQLite
 - NumPy
+- OpenPyXL
 
 ---
 
-# 📂 Project Structure
+# 📁 Estrutura do projeto
 
 ```bash
-inventory-management-system/
-│
+Inventory-Management-Dashboard-using-Streamlit/
 ├── app.py
+├── importacao_em_massa.py
+├── validacao.py
+├── smoke_test.py
+├── TEMPLATE_IMPORTACAO_CDT.csv
 ├── requirements.txt
 ├── README.md
-
+├── image.png
+├── runtime.txt
+├── .gitignore
+└── legacy/
 ```
-## 🌐 Live Demo
 
-🚀 Try the application here:  
-[Inventory Management](https://inventory-management-dashboard-using-app-pcwkyfahbxpsyvaxnrdp9.streamlit.app/)
+A versão principal de manutenção é `app.py`. Os módulos de suporte ativos são `validacao.py` e `importacao_em_massa.py`; arquivos do histórico e variantes antigas foram arquivados em `legacy/` para manter o projeto enxuto e estável.
+
 ---
 
-# ⚙️ Installation
+# ⚙️ Instalação
 
-## 1️⃣ Clone Repository
-
-```bash
-git clone https://github.com/Gayathri-Reddy874/Inventory-Management-Dashboard-using-Streamlit.git
-```
-
-## 2️⃣ Navigate to Project Folder
+## 1) Clonar o repositório
 
 ```bash
+git clone https://github.com/IsraelSiq/Inventory-Management-Dashboard-using-Streamlit.git
 cd Inventory-Management-Dashboard-using-Streamlit
 ```
 
-## 3️⃣ Create Virtual Environment (Optional)
+## 2) Criar ambiente virtual
 
 ### Windows
 
@@ -68,16 +67,14 @@ python -m venv venv
 venv\Scripts\activate
 ```
 
-### Linux/Mac
+### Linux/macOS
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 ```
 
----
-
-# 📥 Install Dependencies
+## 3) Instalar dependências
 
 ```bash
 pip install -r requirements.txt
@@ -85,87 +82,80 @@ pip install -r requirements.txt
 
 ---
 
-# ▶️ Run Application
+# ▶️ Executar a aplicação
 
 ```bash
 streamlit run app.py
 ```
 
----
+# 🧪 Teste local rápido
 
-# 📊 Dashboard Modules
+```bash
+python smoke_test.py
+```
 
-## 📌 Dashboard
-- Total Products
-- Total Stock
-- Inventory Value
-- Low Stock Alerts
-
-## ➕ Add Product
-- Add product details
-- Product validation
-- Duplicate product prevention
-
-## 🔄 Update Stock
-- Modify inventory quantity
-- Auto timestamp update
-
-## 🔍 Search Product
-- Search products dynamically
-
-## ❌ Remove Product
-- Delete inventory items safely
-
-## 📑 Inventory Report
-- Download inventory report as CSV
-
-## 📈 Analytics
-- Quantity Analysis
-- Stock Value Analysis
-- Low Stock Monitoring
+O script valida o fluxo principal de cadastro, entrada, saída e alertas do estoque usando o banco SQLite local do projeto.
 
 ---
 
-# 📸 Screenshots
+# 📊 Fluxo principal
 
 ## Dashboard
+- total de produtos
+- valor em estoque
+- quantidade de itens em estoque baixo
 
-![alt text](image.png)
+## Produtos
+- cadastrar produto
+- validar código e nome
+- controlar categoria, unidade e estoque mínimo
 
----
+## Entradas
+- registrar material recebido
+- atualizar saldo do produto
+- gravar movimentação no histórico
 
-# 🔒 Future Enhancements
+## Saídas
+- registrar consumo/transferência
+- validar saldo disponível
 
-- User Authentication
-- Database Integration (MySQL/PostgreSQL)
-- Barcode Scanner Integration
-- Supplier Management
-- Sales & Billing Module
-- Cloud Deployment
-- AI-Based Inventory Forecasting
+## Alertas
+- notificar quando o estoque estiver abaixo do mínimo
 
----
-
-# 🌐 Deployment
-
-Deployed on Streamlit cloud
-
----
-
-# 👩‍💻 Author
-
-Mallareddygari Gayathri
-
-AI/ML Engineer | Data Science Enthusiast
+## Importação em massa
+- carregar arquivo CSV/XLSX
+- validar colunas e dados
+- revisar itens antes de importar
+- confirmar gravação no banco
 
 ---
 
-# 📄 License
+# 🧾 Banco de dados
 
-This project is licensed under the MIT License.
+O sistema usa SQLite localmente. O banco é criado automaticamente no diretório do projeto. As tabelas principais são:
+
+- `produtos`
+- `movimentacoes`
+- `alertas`
 
 ---
 
-# ⭐ Support
+# 📸 Interface
 
-If you like this project, give it a ⭐ on GitHub.
+![Dashboard](image.png)
+
+---
+
+# 🔒 Melhorias planejadas
+
+- unificar uma versão oficial do aplicativo
+- melhorar regras de negócio e integridade do banco
+- reduzir duplicação entre versões do app
+- ampliar testes automatizados
+- revisar documentação e fluxo de manutenção
+
+---
+
+# 📄 Licença
+
+Este projeto está em desenvolvimento e pode ser usado conforme a licença da organização/autor do repositório.

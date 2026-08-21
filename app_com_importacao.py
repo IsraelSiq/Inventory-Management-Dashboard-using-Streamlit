@@ -2,6 +2,7 @@
 Versao do app.py com tela de importacao de planilhas (Issue #05).
 """
 
+import os
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -10,7 +11,8 @@ from contextlib import contextmanager
 
 from importacao import ler_arquivo, validar_colunas, extrair_dados, upload_arquivo, mostrar_previa, validar_dados
 
-DB_PATH = 'cdt_estoque.db'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'clinica_estoque.db')
 
 @contextmanager
 def get_db_connection():
@@ -30,9 +32,46 @@ def get_db_connection():
 def init_database():
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('CREATE TABLE IF NOT EXISTS produtos (id INTEGER PRIMARY KEY AUTOINCREMENT, codigo TEXT UNIQUE NOT NULL, nome TEXT NOT NULL, categoria TEXT NOT NULL, unidade_medida TEXT NOT NULL DEFAULT "unidade", fornecedor TEXT, preco_unitario DECIMAL(10,2) NOT NULL DEFAULT 0, saldo_atual INTEGER NOT NULL DEFAULT 0, estoque_minimo INTEGER NOT NULL DEFAULT 10, controla_lote BOOLEAN NOT NULL DEFAULT FALSE, ativo BOOLEAN NOT NULL DEFAULT TRUE, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-        cursor.execute('CREATE TABLE IF NOT EXISTS movimentacoes (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, produto_id INTEGER NOT NULL, quantidade INTEGER NOT NULL, responsavel TEXT NOT NULL, destino TEXT NOT NULL, custo_unitario DECIMAL(10,2) NOT NULL DEFAULT 0, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-        cursor.execute('CREATE TABLE IF NOT EXISTS alertas (id INTEGER PRIMARY KEY AUTOINCREMENT, produto_id INTEGER NOT NULL, tipo TEXT NOT NULL, mensagem TEXT NOT NULL, lido BOOLEAN NOT NULL DEFAULT FALSE, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS produtos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                codigo TEXT UNIQUE NOT NULL,
+                nome TEXT NOT NULL,
+                categoria TEXT NOT NULL,
+                unidade_medida TEXT NOT NULL DEFAULT "unidade",
+                fornecedor TEXT,
+                preco_unitario DECIMAL(10,2) NOT NULL DEFAULT 0,
+                saldo_atual INTEGER NOT NULL DEFAULT 0,
+                estoque_minimo INTEGER NOT NULL DEFAULT 10,
+                controla_lote BOOLEAN NOT NULL DEFAULT FALSE,
+                ativo BOOLEAN NOT NULL DEFAULT TRUE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS movimentacoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tipo TEXT NOT NULL,
+                produto_id INTEGER NOT NULL,
+                quantidade INTEGER NOT NULL,
+                responsavel TEXT NOT NULL,
+                destino TEXT NOT NULL,
+                custo_unitario DECIMAL(10,2) NOT NULL DEFAULT 0,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (produto_id) REFERENCES produtos(id)
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS alertas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                produto_id INTEGER NOT NULL,
+                tipo TEXT NOT NULL,
+                mensagem TEXT NOT NULL,
+                lido BOOLEAN NOT NULL DEFAULT FALSE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (produto_id) REFERENCES produtos(id)
+            )
+        ''')
 
 def listar_produtos():
     with get_db_connection() as conn:
@@ -40,28 +79,69 @@ def listar_produtos():
         cursor.execute('SELECT * FROM produtos WHERE ativo = TRUE ORDER BY nome')
         return cursor.fetchall()
 
+def normalizar_codigo(codigo):
+    if codigo is None:
+        return ''
+    return str(codigo).strip().upper()
+
+
+def validar_produto(codigo, nome, preco_unitario, estoque_minimo):
+    codigo = normalizar_codigo(codigo)
+    nome = (nome or '').strip()
+
+    if not codigo:
+        raise ValueError('Codigo do produto e obrigatorio.')
+    if not nome:
+        raise ValueError('Nome do produto e obrigatorio.')
+    if preco_unitario < 0:
+        raise ValueError('Preco unitario nao pode ser negativo.')
+    if estoque_minimo < 0:
+        raise ValueError('Estoque minimo nao pode ser negativo.')
+
+    return codigo, nome
+
+
 def cadastrar_produto(codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, estoque_minimo, controla_lote):
+    codigo, nome = validar_produto(codigo, nome, preco_unitario, estoque_minimo)
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute('SELECT id FROM produtos WHERE codigo = ? AND ativo = TRUE', (codigo,))
+        if cursor.fetchone():
+            raise ValueError(f'Ja existe um produto com o codigo {codigo}.')
         cursor.execute('INSERT INTO produtos (codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, estoque_minimo, controla_lote) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (codigo, nome, categoria, unidade_medida, fornecedor, preco_unitario, estoque_minimo, controla_lote))
         return cursor.lastrowid
 
+
 def registrar_entrada(produto_id, quantidade, responsavel, destino, custo_unitario):
+    if quantidade <= 0:
+        raise ValueError('Quantidade deve ser maior que zero.')
+    if not responsavel or not responsavel.strip():
+        raise ValueError('Responsavel e obrigatorio.')
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute('SELECT id FROM produtos WHERE id = ? AND ativo = TRUE', (produto_id,))
+        if not cursor.fetchone():
+            raise ValueError('Produto nao encontrado.')
         cursor.execute('UPDATE produtos SET saldo_atual = saldo_atual + ? WHERE id = ?', (quantidade, produto_id))
-        cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('ENTRADA', produto_id, quantidade, responsavel, destino, custo_unitario))
+        cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('ENTRADA', produto_id, quantidade, responsavel.strip(), destino, custo_unitario))
         return cursor.lastrowid
 
+
 def registrar_saida(produto_id, quantidade, responsavel, destino, custo_unitario):
+    if quantidade <= 0:
+        raise ValueError('Quantidade deve ser maior que zero.')
+    if not responsavel or not responsavel.strip():
+        raise ValueError('Responsavel e obrigatorio.')
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT saldo_atual FROM produtos WHERE id = ?', (produto_id,))
+        cursor.execute('SELECT saldo_atual FROM produtos WHERE id = ? AND ativo = TRUE', (produto_id,))
         produto = cursor.fetchone()
-        if not produto or produto['saldo_atual'] < quantidade:
-            return None
+        if not produto:
+            raise ValueError('Produto nao encontrado.')
+        if produto['saldo_atual'] < quantidade:
+            raise ValueError('Saldo insuficiente para a saida solicitada.')
         cursor.execute('UPDATE produtos SET saldo_atual = saldo_atual - ? WHERE id = ?', (quantidade, produto_id))
-        cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('SAIDA', produto_id, quantidade, responsavel, destino, custo_unitario))
+        cursor.execute('INSERT INTO movimentacoes (tipo, produto_id, quantidade, responsavel, destino, custo_unitario) VALUES (?, ?, ?, ?, ?, ?)', ('SAIDA', produto_id, quantidade, responsavel.strip(), destino, custo_unitario))
         return cursor.lastrowid
 
 def verificar_alertas():
@@ -151,14 +231,14 @@ elif menu == "📥 Entradas":
                 if resp:
                     try:
                         registrar_entrada(opcoes[produto_sel], qtd, resp, destino, custo)
-                        st.success("Entrada registrada!")
+                        st.success("Entrada registrada com sucesso!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Erro: {e}")
+                        st.error(f"Erro ao registrar entrada: {e}")
                 else:
-                    st.error("Preencha o responsavel!")
+                    st.error("Informe o responsavel.")
     else:
-        st.info("Nenhum produto cadastrado.")
+        st.info("Nenhum produto cadastrado para registrar entrada.")
 
 elif menu == "📤 Saidas":
     st.title("📤 Saidas de Estoque - CDT")
@@ -176,17 +256,22 @@ elif menu == "📤 Saidas":
             custo = st.number_input("Custo unitario (R$)", min_value=0.0, step=0.01)
             if st.form_submit_button("Registrar Saida"):
                 if resp:
-                    resultado = registrar_saida(opcoes[produto_sel], qtd, resp, destino, custo)
-                    if resultado:
-                        st.success("Saida registrada!")
-                        st.rerun()
+                    try:
+                        resultado = registrar_saida(opcoes[produto_sel], qtd, resp, destino, custo)
+                        if resultado:
+                            st.success("Saida registrada com sucesso!")
+                            st.rerun()
+                        else:
+                            st.warning("Saldo insuficiente para esta saida.")
+                    except Exception as e:
+                        st.error(f"Erro ao registrar saida: {e}")
                 else:
-                    st.error("Preencha o responsavel!")
+                    st.error("Informe o responsavel.")
     else:
-        st.info("Nenhum produto cadastrado.")
+        st.info("Nenhum produto cadastrado para registrar saida.")
 
 elif menu == "⚠️ Alertas":
-    st.title("⚠️ Alertas de Estoque Baixo - CDT")
+    st.title("⚠️ Alertas de Estoque")
     verificar_alertas()
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -194,20 +279,31 @@ elif menu == "⚠️ Alertas":
         alertas = cursor.fetchall()
     if alertas:
         for alerta in alertas:
-            st.error(alerta['mensagem'])
-            if st.button(f"Marcar como lido", key=f"alert_{alerta['id']}"):
+            st.warning(alerta['mensagem'])
+            if st.button(f"Marcar como lido - {alerta['id']}", key=alerta['id']):
                 with get_db_connection() as conn:
                     conn.cursor().execute('UPDATE alertas SET lido = TRUE WHERE id = ?', (alerta['id'],))
                 st.rerun()
     else:
-        st.success("✅ Nenhum alerta pendente!")
+        st.success("Nenhum alerta pendente.")
 
 elif menu == "📥 Importar Planilha":
-    st.title("📥 Importar Planilha de Estoque")
-    st.markdown("Importe produtos em massa a partir de uma planilha Excel ou CSV.")
-    df, abas = upload_arquivo()
-    if df is not None:
-        mostrar_previa(df)
-        if validar_dados(df):
-            st.success("✅ Arquivo pronto para importacao! (Issue #08)")
-            st.info("📌 Proximo passo: Implementar tela de revisao e confirmacao (Issue #07)")
+    st.title("📥 Importação em massa")
+    uploaded_file = st.file_uploader("Selecione o arquivo CSV/XLSX", type=['csv', 'xlsx', 'xls'])
+    if uploaded_file:
+        try:
+            df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(('.xlsx', '.xls')) else pd.read_csv(uploaded_file)
+            st.write("Pré-visualização:")
+            st.dataframe(df.head(), use_container_width=True)
+            df_norm = normalizar_dados(df)
+            valido, erros, avisos = validar_dados_completos(df_norm, DB_PATH)
+            if not valido:
+                st.error("Dados inválidos: " + "; ".join(erros))
+            else:
+                st.success("Dados validados com sucesso!")
+                if st.button("Confirmar importação"):
+                    relatorio = importar_produtos_em_massa(df_norm, DB_PATH, responsavel='IMPORTACAO')
+                    mostrar_relatorio_importacao(relatorio)
+        except Exception as e:
+            st.error(f"Erro ao processar arquivo: {e}")
+

@@ -12,7 +12,7 @@ from validacao import normalizar_dados, validar_dados_completos
 from revisao import mostrar_tabela_revisao, confirmar_selecao, mostrar_resumo
 from importacao_em_massa import importar_produtos_em_massa, mostrar_relatorio_importacao
 
-DB_PATH = 'cdt_estoque.db'
+DB_PATH = 'clinica_estoque.db'
 
 @contextmanager
 def get_db_connection():
@@ -153,14 +153,14 @@ elif menu == "📥 Entradas":
                 if resp:
                     try:
                         registrar_entrada(opcoes[produto_sel], qtd, resp, destino, custo)
-                        st.success("Entrada registrada!")
+                        st.success("Entrada registrada com sucesso!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Erro: {e}")
+                        st.error(f"Erro ao registrar entrada: {e}")
                 else:
-                    st.error("Preencha o responsavel!")
+                    st.error("Informe o responsavel.")
     else:
-        st.info("Nenhum produto cadastrado.")
+        st.info("Nenhum produto cadastrado para registrar entrada.")
 
 elif menu == "📤 Saidas":
     st.title("📤 Saidas de Estoque - CDT")
@@ -178,17 +178,22 @@ elif menu == "📤 Saidas":
             custo = st.number_input("Custo unitario (R$)", min_value=0.0, step=0.01)
             if st.form_submit_button("Registrar Saida"):
                 if resp:
-                    resultado = registrar_saida(opcoes[produto_sel], qtd, resp, destino, custo)
-                    if resultado:
-                        st.success("Saida registrada!")
-                        st.rerun()
+                    try:
+                        resultado = registrar_saida(opcoes[produto_sel], qtd, resp, destino, custo)
+                        if resultado:
+                            st.success("Saida registrada com sucesso!")
+                            st.rerun()
+                        else:
+                            st.warning("Saldo insuficiente para esta saida.")
+                    except Exception as e:
+                        st.error(f"Erro ao registrar saida: {e}")
                 else:
-                    st.error("Preencha o responsavel!")
+                    st.error("Informe o responsavel.")
     else:
-        st.info("Nenhum produto cadastrado.")
+        st.info("Nenhum produto cadastrado para registrar saida.")
 
 elif menu == "⚠️ Alertas":
-    st.title("⚠️ Alertas de Estoque Baixo - CDT")
+    st.title("⚠️ Alertas de Estoque")
     verificar_alertas()
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -196,88 +201,31 @@ elif menu == "⚠️ Alertas":
         alertas = cursor.fetchall()
     if alertas:
         for alerta in alertas:
-            st.error(alerta['mensagem'])
-            if st.button(f"Marcar como lido", key=f"alert_{alerta['id']}"):
+            st.warning(alerta['mensagem'])
+            if st.button(f"Marcar como lido - {alerta['id']}", key=alerta['id']):
                 with get_db_connection() as conn:
                     conn.cursor().execute('UPDATE alertas SET lido = TRUE WHERE id = ?', (alerta['id'],))
                 st.rerun()
     else:
-        st.success("✅ Nenhum alerta pendente!")
+        st.success("Nenhum alerta pendente.")
 
-# NOVA TELA: IMPORTAR PLANILHA COMPLETA (Issue #08)
 elif menu == "📥 Importar Planilha (COMPLETO)":
-    st.title("📥 Importar Planilha de Estoque")
-    st.markdown("Importe produtos em massa com revisao, validacao e confirmacao.")
-    
-    # Inicializa estado da sessao
-    if 'df_importacao' not in st.session_state:
-        st.session_state.df_importacao = None
-    if 'df_revisao' not in st.session_state:
-        st.session_state.df_revisao = None
-    if 'importacao_concluida' not in st.session_state:
-        st.session_state.importacao_concluida = False
-    
-    # Passo 1: Upload
-    st.subheader("📤 Passo 1: Upload do Arquivo")
-    df, abas = upload_arquivo()
-    
-    if df is not None:
-        st.session_state.df_importacao = df
-        
-        # Passo 2: Normaliza
-        st.subheader("🔄 Passo 2: Normalizacao")
-        df_norm = normalizar_dados(df)
-        st.success("✅ Dados normalizados!")
-        
-        # Passo 3: Valida
-        st.subheader("✅ Passo 3: Validacao")
-        valido, erros, avisos = validar_dados_completos(df_norm, DB_PATH)
-        
-        if not valido:
-            st.error("❌ Erros encontrados:")
-            for erro in erros:
-                st.error(f"  • {erro}")
-            st.stop()
-        
-        st.success("✅ Dados validos!")
-        
-        # Passo 4: Revisao
-        st.divider()
-        st.subheader("📋 Passo 4: Revisao dos Itens")
-        df_editado = mostrar_tabela_revisao(df_norm)
-        
-        if df_editado is not None and len(df_editado) > 0:
-            st.session_state.df_revisao = df_editado
-            
-            # Passo 5: Confirma selecao
-            st.divider()
-            st.subheader("✅ Passo 5: Confirmacao")
-            
-            df_selecionados, resumo = confirmar_selecao(df_editado)
-            
-            # Mostra resumo
-            mostrar_resumo(resumo)
-            
-            # Botao de confirmacao
-            if resumo['selecionados'] > 0:
-                if st.button(f"🚀 CONFIRMAR IMPORTACAO DE {resumo['selecionados']} ITENS", type="primary", disabled=st.session_state.importacao_concluida):
-                    with st.spinner("⏳ Importando produtos..."):
-                        # Remove coluna 'selecionado' se existir
-                        if 'selecionado' in df_selecionados.columns:
-                            df_selecionados = df_selecionados.drop(columns=['selecionado'])
-                        
-                        # Importa em massa
-                        relatorio = importar_produtos_em_massa(df_selecionados, DB_PATH, responsavel='IMPORTACAO')
-                        
-                        # Mostra relatorio
-                        mostrar_relatorio_importacao(relatorio)
-                        
-                        # Sucesso
-                        if relatorio['erros'] == 0:
-                            st.success(f"🎉 IMPORTACAO CONCLUIDA COM SUCESSO!")
-                            st.balloons()
-                            st.session_state.importacao_concluida = True
-                        else:
-                            st.warning(f"⚠️ Importacao concluida com {relatorio['erros']} erros")
+    st.title("📥 Importação em massa")
+    uploaded_file = st.file_uploader("Selecione o arquivo CSV/XLSX", type=['csv', 'xlsx', 'xls'])
+    if uploaded_file:
+        try:
+            df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(('.xlsx', '.xls')) else pd.read_csv(uploaded_file)
+            st.write("Pré-visualização:")
+            st.dataframe(df.head(), use_container_width=True)
+            df_norm = normalizar_dados(df)
+            valido, erros, avisos = validar_dados_completos(df_norm, DB_PATH)
+            if not valido:
+                st.error("Dados inválidos: " + "; ".join(erros))
             else:
-                st.warning("⚠️ Nenhum item selecionado para importacao")
+                st.success("Dados validados com sucesso!")
+                if st.button("Confirmar importação"):
+                    relatorio = importar_produtos_em_massa(df_norm, DB_PATH, responsavel='IMPORTACAO')
+                    mostrar_relatorio_importacao(relatorio)
+        except Exception as e:
+            st.error(f"Erro ao processar arquivo: {e}")
+
