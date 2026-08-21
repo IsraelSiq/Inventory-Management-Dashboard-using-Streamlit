@@ -33,21 +33,19 @@ Aplicativo de controle de estoque em Python com Streamlit, focado em ambiente cl
 ```bash
 Inventory-Management-Dashboard-using-Streamlit/
 ├── app.py
-├── app_com_importacao.py
-├── app_final_v2.py
-├── importacao.py
 ├── importacao_em_massa.py
 ├── validacao.py
-├── revisao.py
-├── normalizar_planilha_cdt.py
+├── smoke_test.py
 ├── TEMPLATE_IMPORTACAO_CDT.csv
 ├── requirements.txt
 ├── README.md
 ├── image.png
-└── .gitignore
+├── runtime.txt
+├── .gitignore
+└── legacy/
 ```
 
-Observação: existem múltiplas versões evolutivas do app. A versão principal de referência para manutenção é `app.py`, enquanto os demais arquivos representam iterações da funcionalidade de importação e revisão.
+A versão principal de manutenção é `app.py`. Os módulos de suporte ativos são `validacao.py` e `importacao_em_massa.py`; arquivos do histórico e variantes antigas foram arquivados em `legacy/` para manter o projeto enxuto e estável.
 
 ---
 
@@ -89,6 +87,14 @@ pip install -r requirements.txt
 ```bash
 streamlit run app.py
 ```
+
+# 🧪 Teste local rápido
+
+```bash
+python smoke_test.py
+```
+
+O script valida o fluxo principal de cadastro, entrada, saída e alertas do estoque usando o banco SQLite local do projeto.
 
 ---
 
