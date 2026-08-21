@@ -128,7 +128,8 @@ A interface principal permite:
 - Registro de entradas e saídas
 - Alertas de estoque baixo
 - Relatórios e exportação em Excel
-- Importação em massa
+- Importação em massa de listas de materiais via CSV/XLSX
+- Upload do material em lote com validação de colunas e regras de negócio
 
 ---
 
