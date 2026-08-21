@@ -1,138 +1,193 @@
-# 📦 Inventory Management Dashboard
+# Inventory Management Dashboard
 
-Aplicativo de controle de estoque em Python com Streamlit, focado em ambiente clínico/CDT. O projeto permite cadastrar produtos, controlar entradas e saídas, visualizar alertas de estoque baixo e importar planilhas em massa.
+Aplicativo de controle de estoque em Python com Streamlit, focado em operação clínica e almoxarifado. O projeto centraliza cadastro de produtos, movimentação de estoque, alertas, importação em massa e exportação de relatórios.
 
----
-
-# 🚀 Funcionalidades
-
-✅ Cadastro de produtos
-✅ Controle de estoque por unidade e categoria
-✅ Registro de entradas e saídas
-✅ Alertas automáticos de estoque baixo
-✅ Dashboard com indicadores de estoque
-✅ Importação de planilhas CSV/XLSX
-✅ Revisão e validação de dados antes da importação
-✅ Persistência local em SQLite
+Status atual: versão principal validada e estável, com foco em manutenção da aplicação ativa e no reforço de validações de negócio.
 
 ---
 
-# 🛠️ Stack
+## O que foi entregue
 
-- Python
-- Streamlit
-- Pandas
-- SQLite
-- NumPy
-- OpenPyXL
+- validação de cadastro de produtos e regras de estoque
+- prevenção de código duplicado e movimentações inválidas
+- integridade do banco SQLite com chaves estrangeiras
+- importação em massa com checagem de colunas, valores e duplicidades
+- suporte a PDF textual e fallback OCR para PDFs digitalizados
+- geração de relatório do estoque com valor total e exportação para Excel
+- testes automatizados focados em regressão
 
 ---
 
-# 📁 Estrutura do projeto
+## Aplicação principal
+
+A execução principal do projeto fica em:
+
+- `app.py` — dashboard principal, cadastro, movimentações, alertas e relatórios
+
+Módulos ativos de apoio:
+
+- `validacao.py` — padronização e validação de dados
+- `importacao.py` — leitura/importação de arquivos e processamento de PDFs
+- `importacao_em_massa.py` — fluxo de importação em massa e relatório de importação
+
+Arquivos históricos/variantes antigas continuam existindo no repositório, mas não são a fonte de verdade do fluxo ativo. A manutenção do projeto deve priorizar `app.py` e os módulos de suporte diretamente utilizados por ela.
+
+---
+
+## Estrutura do repositório
 
 ```bash
 Inventory-Management-Dashboard-using-Streamlit/
 ├── app.py
+├── importacao.py
 ├── importacao_em_massa.py
 ├── validacao.py
 ├── smoke_test.py
-├── TEMPLATE_IMPORTACAO_CDT.csv
 ├── requirements.txt
 ├── README.md
+├── TEMPLATE_IMPORTACAO_CDT.csv
 ├── image.png
-├── runtime.txt
-├── .gitignore
-└── legacy/
+├── tests/
+│   ├── test_pdf_textual.py
+│   ├── test_pdf_ocr.py
+│   ├── test_pdf_formatos_cdt.py
+│   └── test_relatorios.py
+├── docs/
+├── app/
+├── app_com_importacao.py
+├── app_com_revisao.py
+├── app_final_v2.py
+├── normalizar_planilha_cdt.py
+├── revisao.py
+├── tema.py
+└── .gitignore
 ```
-
-A versão principal de manutenção é `app.py`. Os módulos de suporte ativos são `validacao.py` e `importacao_em_massa.py`; arquivos do histórico e variantes antigas foram arquivados em `legacy/` para manter o projeto enxuto e estável.
 
 ---
 
-# ⚙️ Instalação
+## Stack
 
-## 1) Clonar o repositório
+- Python
+- Streamlit
+- SQLite
+- Pandas
+- NumPy
+- OpenPyXL
+- pdfplumber
+- pdf2image
+- pytesseract
+- pytest
+
+---
+
+## Instalação local
+
+### 1) Clonar o repositório
 
 ```bash
 git clone https://github.com/IsraelSiq/Inventory-Management-Dashboard-using-Streamlit.git
 cd Inventory-Management-Dashboard-using-Streamlit
 ```
 
-## 2) Criar ambiente virtual
+### 2) Criar ambiente virtual
 
-### Windows
+Windows:
 
 ```bash
 python -m venv venv
 venv\Scripts\activate
 ```
 
-### Linux/macOS
+Linux/macOS:
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 ```
 
-## 3) Instalar dependências
+### 3) Instalar dependências
 
 ```bash
 pip install -r requirements.txt
 ```
 
+Se houver uso de OCR em PDFs, confirme também que o executável do Tesseract está instalado no sistema operacional.
+
 ---
 
-# ▶️ Executar a aplicação
+## Como executar
 
 ```bash
 streamlit run app.py
 ```
 
-# 🧪 Teste local rápido
+A interface principal permite:
+
+- Dashboard com resumo geral
+- Cadastro de produtos
+- Registro de entradas e saídas
+- Alertas de estoque baixo
+- Relatórios e exportação em Excel
+- Importação em massa
+
+---
+
+## Testes locais
+
+### Smoke test do fluxo principal
 
 ```bash
 python smoke_test.py
 ```
 
-O script valida o fluxo principal de cadastro, entrada, saída e alertas do estoque usando o banco SQLite local do projeto.
+### Suite de testes automatizados
+
+```bash
+pytest -q
+```
+
+Cobertura atual:
+
+- fluxo principal do inventário
+- extração textual de PDFs
+- OCR para PDFs digitalizados
+- classificação de formatos CDT
+- geração e exportação de relatórios
 
 ---
 
-# 📊 Fluxo principal
+## Regras de negócio reforçadas
 
-## Dashboard
-- total de produtos
-- valor em estoque
-- quantidade de itens em estoque baixo
+- código de produto obrigatório e único
+- nome do produto obrigatório
+- valores negativos são rejeitados
+- quantidade de movimentação deve ser positiva
+- saída só é permitida quando existe saldo suficiente
+- banco SQLite reforça integridade referencial entre produtos, movimentações e alertas
 
-## Produtos
-- cadastrar produto
-- validar código e nome
-- controlar categoria, unidade e estoque mínimo
+## Perfil de acesso
 
-## Entradas
-- registrar material recebido
-- atualizar saldo do produto
-- gravar movimentação no histórico
+A aplicação agora também expõe perfis de acesso por papel:
 
-## Saídas
-- registrar consumo/transferência
-- validar saldo disponível
+- `Administrador`: acesso completo ao cadastro, movimentação, alertas e relatórios
+- `Operador`: acesso às movimentações e alertas, sem cadastro de produtos
+- `Visualização`: somente dashboard e relatórios
 
-## Alertas
-- notificar quando o estoque estiver abaixo do mínimo
+Isso ajuda a controlar o uso da interface em ambientes compartilhados sem impactar o fluxo principal de operação.
 
-## Importação em massa
-- carregar arquivo CSV/XLSX
-- validar colunas e dados
-- revisar itens antes de importar
-- confirmar gravação no banco
+## Controle de lote e validade
+
+Produtos marcados com `Controla lote` exigem lote e validade obrigatórios ao cadastrar e em cada movimentação de entrada/saída. O formato da validade é validado como `YYYY-MM-DD`.
+
+Isso reduz riscos operacionais em itens sensíveis, reduzindo cadastros incompletos e movimentações sem rastreabilidade.
 
 ---
 
-# 🧾 Banco de dados
+## Banco de dados
 
-O sistema usa SQLite localmente. O banco é criado automaticamente no diretório do projeto. As tabelas principais são:
+O sistema usa SQLite local em disco. O banco é criado automaticamente quando a aplicação inicia.
+
+Tabelas principais:
 
 - `produtos`
 - `movimentacoes`
@@ -140,22 +195,14 @@ O sistema usa SQLite localmente. O banco é criado automaticamente no diretório
 
 ---
 
-# 📸 Interface
+## Status do projeto
 
-![Dashboard](image.png)
+O projeto está em estado validado para uso local e manutenção incremental. Os itens críticos de validação do fluxo principal foram corrigidos e cobertos por testes de regressão.
 
----
-
-# 🔒 Melhorias planejadas
-
-- unificar uma versão oficial do aplicativo
-- melhorar regras de negócio e integridade do banco
-- reduzir duplicação entre versões do app
-- ampliar testes automatizados
-- revisar documentação e fluxo de manutenção
+Próximas melhorias, quando desejadas, devem seguir a ordem de prioridade do backlog e sem abrir escopo de refatoração ampla em arquivos de execução principal.
 
 ---
 
-# 📄 Licença
+## Licença
 
-Este projeto está em desenvolvimento e pode ser usado conforme a licença da organização/autor do repositório.
+Este repositório é mantido para fins de desenvolvimento e uso interno/institucional conforme a política do projeto e do autor responsável.
