@@ -5,6 +5,8 @@ import sqlite3
 from datetime import datetime
 from contextlib import contextmanager
 
+from importacao_em_massa import importar_produtos_em_massa, mostrar_relatorio_importacao, validar_df_importacao
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'clinica_estoque.db')
 
@@ -216,7 +218,7 @@ st.set_page_config(page_title="Controle de Estoque - Clinica", layout="wide")
 init_database()
 
 st.sidebar.title("Controle de Estoque")
-menu = st.sidebar.radio("Navegacao", ["Dashboard", "Produtos", "Entradas", "Saidas", "Alertas"])
+menu = st.sidebar.radio("Navegacao", ["Dashboard", "Produtos", "Entradas", "Saidas", "Importar materiais", "Alertas"])
 
 if menu == "Dashboard":
     st.title("Dashboard")
@@ -286,6 +288,27 @@ elif menu == "Saidas":
                     st.success("Saida registrada!")
                 except Exception as e:
                     st.error(f"Erro: {e}")
+
+elif menu == "Importar materiais":
+    st.title("Importar lista de materiais")
+    st.caption("Carregue um CSV ou Excel com as colunas obrigatorias: ITEM, MATERIAL, UNIDADE, ESTOQUE_ATUAL, ESTOQUE_MINIMO e CATEGORIA.")
+
+    uploaded_file = st.file_uploader("Selecione o arquivo da lista de materiais", type=['csv', 'xlsx', 'xls'])
+    if uploaded_file is not None:
+        try:
+            if uploaded_file.name.endswith(('.xlsx', '.xls')):
+                df = pd.read_excel(uploaded_file)
+            else:
+                df = pd.read_csv(uploaded_file)
+
+            validar_df_importacao(df)
+            st.dataframe(df.head(20), use_container_width=True)
+
+            if st.button("Importar para o estoque"):
+                relatorio = importar_produtos_em_massa(df, db_path=DB_PATH, responsavel='UPLOAD_MATERIAL')
+                mostrar_relatorio_importacao(relatorio)
+        except Exception as exc:
+            st.error(f"Erro ao importar a lista: {exc}")
 
 elif menu == "Alertas":
     st.title("Alertas")
